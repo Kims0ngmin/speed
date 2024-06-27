@@ -8,18 +8,22 @@ import csv
 from datetime import datetime
 from tkinter import scrolledtext
 import matplotlib.colors as mcolors
+from moviepy.editor import VideoFileClip
+import os
+
+pts_cnt = 0
+pts = np.zeros((4, 2), dtype=np.float32)
 
 class ImageEditor:
-    def __init__(self, root, image_path):
+    def __init__(self, root, video_clip):
         self.color_dict = {'x': 'blue', 'y': 'green', 'z': 'orange'}
         self.mouse_x = 0
         self.mouse_y = 0
         self.root = root
         self.root.title("Image Editor")
 
-        self.image_path = image_path
-        self.image = cv2.imread(image_path)
-        self.image = cv2.resize(self.image, (640, 480))
+        self.video_clip = video_clip
+        self.image = self.get_first_frame(video_clip)
         self.image_copies = [self.image.copy()]
         self.display_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(self.display_image))
@@ -34,46 +38,48 @@ class ImageEditor:
 
         # Add Image
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-      
+        
+        # Bind mouse event
+        self.canvas.bind("<Button-1>", self.on_mouse1)
+
         # 버튼을 담을 프레임 생성
         self.button_frame = tk.Frame(self.frame)
         self.button_frame.pack(side=tk.TOP, anchor="nw")
 
-        self.pick_x_button = tk.Button(self.button_frame, text="X - axis", command=lambda: self.pick_points('x'), fg="blue")
-        self.pick_x_button.pack(side=tk.LEFT, anchor="nw")
+        self.pick_line_button = tk.Button(self.button_frame, text="Line Maker", command=lambda: self.pick_points('z'), fg="black")
+        self.pick_line_button.pack(side=tk.LEFT, anchor="nw")
 
-        self.pick_y_button = tk.Button(self.button_frame, text="Y - axis", command=lambda: self.pick_points('y'), fg="green")
-        self.pick_y_button.pack(side=tk.LEFT, anchor="nw")
+        self.perform_button = tk.Button(self.button_frame, text="Perform", command=lambda: self.close_window(root), fg="black")
+        self.perform_button.pack(side=tk.LEFT, anchor="nw")
+        self.onMouse_button = tk.Button(self.button_frame, text="onMouse", command=lambda: self.on_mouse1, fg="black")
+        self.onMouse_button.pack(side=tk.LEFT, anchor="nw")
 
-        self.pick_z_button = tk.Button(self.button_frame, text="Z - axis", command=lambda: self.pick_points('z'), fg="orange")
-        self.pick_z_button.pack(side=tk.LEFT, anchor="nw")
-        
         # 버튼 프레임 아래에 라벨 배치
         self.mini_image_label = tk.Label(self.frame, text="Mini Image")
         self.mini_image_label.pack(side=tk.TOP, anchor="nw")
 
         # Display the mini image
         self.display_mini_image()
-        
+
         self.clear_button = tk.Button(root, text="Clear", command=self.clear_lines)
         self.clear_button.pack(side=tk.RIGHT, padx=1)
 
-        # Points for 'x~m' group
-        self.x_points = []  
-        self.y_points = [] 
-        self.z_points = [] 
-
-        self.x_lines = [] 
-        self.y_lines = [] 
+        # Points for 'z' group
+        self.z_points = []
         self.z_lines = []
-        
+
         self.current_group = None
 
         self.csv_filename = "lines_data.csv"  # CSV file to store line coordinates
 
         self.points = []
         self.canvas.bind("<Motion>", self.display_mouse_position)
-        
+
+    def get_first_frame(self, video_clip):
+        frame = video_clip.get_frame(0)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame = cv2.resize(frame, (640, 480))
+        return frame
 
     def display_mouse_position(self, event):
         self.mouse_x = event.x
@@ -82,20 +88,18 @@ class ImageEditor:
         # 마우스 위치가 변경될 때마다 미니 이미지 업데이트
         self.display_mini_image()
 
-
     def pick_points(self, group):
         self.current_group = group
         self.points = []  # Reset points when a new group is selected
         self.canvas.bind("<Button-1>", self.get_point)
         self.canvas.bind("<Motion>", self.display_mouse_position)
 
-
     def get_point(self, event):
         x, y = event.x, event.y
         self.points.append((x, y))
 
         # Draw a small circle at the picked point with group-specific color
-        point_color= self.color_dict.get(self.current_group)
+        point_color = self.color_dict.get(self.current_group)
         rgb_color = mcolors.to_rgb(point_color)
         point_color = (int(rgb_color[2] * 255), int(rgb_color[1] * 255), int(rgb_color[0] * 255))
 
@@ -113,20 +117,20 @@ class ImageEditor:
             getattr(self, f"{self.current_group}_lines").append(self.points)
             self.points = []
             self.image_copies.append(self.image.copy())
-                
+
             # Reset points after drawing a line
             self.points = []
 
         # Update the displayed image
         self.display_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(self.display_image))
-        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)      
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
 
     def draw_marker(self, intersection_point, color):
         # Draw a marker or line at the calculated intersection point
         if intersection_point:
-            self.update_displayed_image()            
-        
+            self.update_displayed_image()
+
     def clear_lines(self):
         if self.current_group is not None:
             # Remove the last line for the currently selected group
@@ -140,39 +144,38 @@ class ImageEditor:
                 group_points.pop()
                 group_points.pop()
 
-            self.image = cv2.imread(self.image_path)
-            self.image = cv2.resize(self.image, (640, 480))
+            self.image = self.get_first_frame(self.video_clip)
             self.update_displayed_image()
-            
+
     def update_displayed_image(self):
-            for group in ['x', 'y', 'z']:
-                group_points = getattr(self, f"{group}_points")
-                group_lines = getattr(self, f"{group}_lines")
-                line_color = self.color_dict.get(group)
-                rgb_color = mcolors.to_rgb(line_color)
-                line_color = (int(rgb_color[2] * 255), int(rgb_color[1] * 255), int(rgb_color[0] * 255))
+        for group in ['x', 'y', 'z']:
+            group_points = getattr(self, f"{group}_points")
+            group_lines = getattr(self, f"{group}_lines")
+            line_color = self.color_dict.get(group)
+            rgb_color = mcolors.to_rgb(line_color)
+            line_color = (int(rgb_color[2] * 255), int(rgb_color[1] * 255), int(rgb_color[0] * 255))
 
-                # Redraw all points for the current group
-                for point in group_points:
-                    x, y = point
-                    cv2.circle(self.image, (x, y), 3, line_color, -1)
+            # Redraw all points for the current group
+            for point in group_points:
+                x, y = point
+                cv2.circle(self.image, (x, y), 3, line_color, -1)
 
-                # Redraw all lines for the current group
-                for line in group_lines:
-                    x1, y1 = line[0]
-                    x2, y2 = line[1]
-                    cv2.line(self.image, (x1, y1), (x2, y2), line_color, 2)
+            # Redraw all lines for the current group
+            for line in group_lines:
+                x1, y1 = line[0]
+                x2, y2 = line[1]
+                cv2.line(self.image, (x1, y1), (x2, y2), line_color, 2)
 
-            self.display_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
-            self.photo = ImageTk.PhotoImage(image=Image.fromarray(self.display_image))
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-            # Call the method to update the mini image
-            self.display_mini_image()
-            
+        self.display_image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
+        self.photo = ImageTk.PhotoImage(image=Image.fromarray(self.display_image))
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+        # Call the method to update the mini image
+        self.display_mini_image()
+
     def display_mini_image(self):
         # Set area size based on center
         region_size = 100
-        
+
         image_height, image_width = self.image.shape[:2]
 
         # Calculate the desired size of the area at the mouse location
@@ -207,3 +210,119 @@ class ImageEditor:
 
         self.mini_image_label.config(image=mini_photo)
         self.mini_image_label.image = mini_photo
+
+    def close_window(self, window):
+        window.destroy()
+
+    # def onMouse(self, event, x, y):
+
+    #     print("d")
+    #     global pts_cnt
+    #     if event == cv2.EVENT_LBUTTONDOWN:
+    #         print("de")
+    #         draw = self.image
+    #         # 좌표에 초록색 동그라미 표시
+    #         cv2.circle(draw, (x, y), 10, (0, 255, 0), -1)
+    #         # cv2.imshow(win_name, draw)
+
+    #         # 마우스 좌표 저장
+    #         pts[pts_cnt] = [x, y]
+    #         pts_cnt += 1
+    #         if pts_cnt == 4:
+
+    #             print("deb")
+
+    #             topLeft = pts[0]
+    #             bottomRight = pts[2]
+    #             topRight = pts[3]
+    #             bottomLeft = pts[1]
+                
+    #             print("topLeft =", topLeft)
+    #             print("bottomRight =", bottomRight)
+    #             print("topRight =", topRight)
+    #             print("bottomLeft =", bottomLeft)
+
+    #             w = int(np.linalg.norm(np.array(topRight) - np.array(topLeft)))
+    #             h = int(np.linalg.norm(np.array(bottomLeft) - np.array(topLeft)))
+    #             print(f"{w} x {h}")
+                
+    #             # Coordinates that you want to Perspective Transform
+    #             pts1 = np.float32([topLeft, topRight, bottomLeft, bottomRight])
+    #             # Size of the Transformed Image
+    #             pts2 = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+                
+    #             M = cv2.getPerspectiveTransform(pts1, pts2)
+    #             dst = cv2.warpPerspective(self.image, M, (int(w), int(h)))
+                
+    #             # Create the transformed images directory if it does not exist
+    #             transformed_images_dir = "./transformed_images/dir"
+    #             if not os.path.exists(transformed_images_dir):
+    #                 os.makedirs(transformed_images_dir)
+                
+    #             cv2.imwrite(os.path.join(transformed_images_dir, "transformed.jpg"), dst)
+    #             # cv2.imshow("dst", dst)
+
+    #             # Store the points in a text file within the dataset folder
+    #             dataset_folder = "./dd"
+    #             if not os.path.exists(dataset_folder):
+    #                 os.makedirs(dataset_folder)
+
+    #             txt_file_path = os.path.join(dataset_folder, "mouse_points.txt")
+    #             with open(txt_file_path, 'w') as f:
+    #                 for point in pts:
+    #                     f.write(f"{point[0]}, {point[1]}\n")
+    #             print(f"좌표가 {txt_file_path}에 저장되었습니다.")
+
+
+    def on_mouse1(self, event):
+
+        x, y = event.x, event.y
+        self.pts[self.pts_cnt] = [x, y]
+        self.pts_cnt += 1
+
+        # Draw a circle at the clicked point
+        self.draw = cv2.circle(self.draw, (x, y), 10, (0, 255, 0), -1)
+        self.update_canvas()
+
+        if self.pts_cnt == 4:
+            self.process_points()
+
+    def process_points(self):
+        topLeft = self.pts[0]
+        bottomRight = self.pts[2]
+        topRight = self.pts[3]
+        bottomLeft = self.pts[1]
+
+        print("topLeft =", topLeft)
+        print("bottomRight =", bottomRight)
+        print("topRight =", topRight)
+        print("bottomLeft =", bottomLeft)
+
+        w = int(np.linalg.norm(np.array(topRight) - np.array(topLeft)))
+        h = int(np.linalg.norm(np.array(bottomLeft) - np.array(topLeft)))
+        print(f"{w} x {h}")
+
+        pts1 = np.float32([topLeft, topRight, bottomLeft, bottomRight])
+        pts2 = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+
+        M = cv2.getPerspectiveTransform(pts1, pts2)
+        dst = cv2.warpPerspective(self.frame, M, (int(w), int(h)))
+
+        transformed_images_dir = "./transformed_images/tt"
+        if not os.path.exists(transformed_images_dir):
+            os.makedirs(transformed_images_dir)
+
+        img_time = "0.00"
+        cv2.imwrite(os.path.join(transformed_images_dir, img_time + ".jpg"), dst)
+        cv2.imshow("dst", dst)
+
+        txt_file_path = os.path.join("tt", "mouse_points.txt")
+        with open(txt_file_path, 'w') as f:
+            for point in self.pts:
+                f.write(f"{point[0]}, {point[1]}\n")
+        print(f"Coordinates saved to {txt_file_path}")
+
+    def update_canvas(self):
+        self.display_image = cv2.cvtColor(self.draw, cv2.COLOR_BGR2RGB)
+        self.photo = ImageTk.PhotoImage(image=Image.fromarray(self.display_image))
+        self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
