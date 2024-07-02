@@ -3,7 +3,7 @@ from tkinter import *
 from tkinter import filedialog
 from moviepy.editor import VideoFileClip
 import cv2
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import numpy as np
 import os
 import ui_func as func
@@ -20,6 +20,8 @@ paused = True
 current_time = 0
 subclip_duration = 0
 video_load_on = 0
+time_start = 4.10
+width1 = 300
 
 # 전역 변수로 scale과 time_label 선언
 scale = None
@@ -81,9 +83,9 @@ def load_video():
 
 def resize_frame(frame, width, height):
     """cv2를 사용하여 프레임 크기 조정"""
-    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # RGB에서 BGR로 변환
+    # frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # RGB에서 BGR로 변환
     resized_frame = cv2.resize(frame, (width, height))
-    return cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)  # BGR에서 RGB로 변환
+    return resized_frame#cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)  # BGR에서 RGB로 변환
 
 def update_frame():
     global current_image_index, images, canvas, paused
@@ -100,50 +102,64 @@ def update_frame():
         paused = True
 
 def play_images():
-    global images, current_image_index
-    images = []
-    current_image_index = 0
-    folder_path = filedialog.askdirectory()
-    if folder_path:
-        for filename in sorted(os.listdir(folder_path)):
-            if filename.endswith('.jpg'):
-                img_path = os.path.join(folder_path, filename)
-                img = cv2.imread(img_path)
-                if img is not None:
-                    images.append(img)
-        status_label.config(text=f"Loaded {len(images)} images from: {folder_path}")
+    global video_load_on, img_time
+
+    if video_load_on == 0:
+        global images, current_image_index
+        images = []
+        current_image_index = 0
+        folder_path = filedialog.askdirectory()
+        if folder_path:
+            for filename in sorted(os.listdir(folder_path)):
+                if filename.endswith('.jpg'):
+                    img_path = os.path.join(folder_path, filename)
+                    img_time = update_img_time_from_frame_name(filename)
+                    img = cv2.imread(img_path)
+                    if img is not None:
+                        images.append(img)
+            status_label.config(text=f"Loaded {len(images)} images from: {folder_path}")
+    
+    video_load_on = 1
     global paused
     paused = False
     update_frame()
 
 def pause_images():
-    global paused
+    global paused, current_image_index, img_time
+    # img_time = update_img_time_from_frame_name(images[current_image_index])
+    print("Stop frame : "+str(current_image_index))
     paused = True
-
-# def load_images():
-#     global images, current_image_index
-#     images = []
-#     current_image_index = 0
-#     folder_path = filedialog.askdirectory()
-#     if folder_path:
-#         for filename in sorted(os.listdir(folder_path)):
-#             if filename.endswith('.jpg'):
-#                 img_path = os.path.join(folder_path, filename)
-#                 img = cv2.imread(img_path)
-#                 if img is not None:
-#                     images.append(img)
-#         status_label.config(text=f"Loaded {len(images)} images from: {folder_path}")
 
 def select(event):
     value = "Enter time to start (seconds) : "+ str(scale.get())
     time_label.config(text = value)
 
-def perform_action():
+def transform_action():
     global video_clip
     # 새로운 창 생성
     new_root = tk.Toplevel()
     # app = func.ImageEditor(new_root, video_clip)
     app = t.ImageEditor(new_root, video_clip)
+
+def speed_est():
+    print("speed!")
+    on_mouse_active = True
+    canvas.bind("<Button-1>", onMouse)
+
+
+# Mouse callback function for length and speed estimation
+def onMouse(event):
+    global estimated_length, full_length, img_time, width1, time_start
+    full_length = 6
+    x = event.x
+    y = event.y
+    if event:
+        canvas.create_oval(x-5, y-5, x+5, y+5, outline="green", width=2)
+        estimated_length = (x / width1) / 1.6 * full_length  # meters
+        # img_time = update_img_time_from_frame_name()
+        estimated_velocity = (estimated_length / 1000.0) / ((float(img_time) - time_start) / 3600.0)  # km/h
+        print("length : %.1f [m]" % estimated_length)
+        print("velocity : %.1f [km/h]" % estimated_velocity)
 
 
 def center_window(root, width, height):
@@ -157,6 +173,23 @@ def center_window(root, width, height):
     
     # 윈도우 크기와 위치 설정
     root.geometry(f'{width}x{height}+{x}+{y}')
+
+
+# Function to update img_time with the current extrac_frame name
+def update_img_time_from_frame_name(frame_name):
+    global img_time
+    timestamp = frame_name.split('_')[1].replace('.jpg', '')
+    print("times")
+    print(timestamp)
+    img_time = timestamp
+    return img_time
+
+def start_checker():
+    global time_start, width1, img_time
+    # img_time = update_img_time_from_frame_name(images[current_image_index])
+    # time_start = img_time
+    time_start = 4.10
+    width1 = 300
 
 # Tkinter 윈도우 생성
 root = tk.Tk()
@@ -200,8 +233,12 @@ play_button.pack(side=tk.LEFT, anchor="nw")
 pause_button = tk.Button(button_frame, text="Pause Video", command=pause_images)
 pause_button.pack(side=tk.LEFT, anchor="nw")
 
-perform_button = tk.Button(button_frame2, text="Perform", command=perform_action)
+perform_button = tk.Button(button_frame2, text="Transform", command=transform_action)
 perform_button.pack(side=tk.LEFT, anchor="w")
+perform_button1 = tk.Button(button_frame2, text="Speed Estimation", command=speed_est)
+perform_button1.pack(side=tk.LEFT, anchor="w")
+# perform_button2 = tk.Button(button_frame2, text="Sart time", command=start_checker)
+# perform_button2.pack(side=tk.LEFT, anchor="w")
 
 # Tkinter 이벤트 루프 시작
 root.mainloop()
